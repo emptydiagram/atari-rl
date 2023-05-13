@@ -1,3 +1,4 @@
+from collections import deque
 import math
 import random
 
@@ -50,7 +51,6 @@ class DeepQNetworkCNN(nn.Module):
         The value `a* := argmax_{a in A} [ Q(x,a) ]` is the greedy action. The agent using the DQN will (often) use an
         epsilon-greedy strategy (e.g. take a random action with probability `eps`, and `a*` with probability
         `1 - eps`)"""
-        print(x.shape)
         z = F.relu(self.conv1(x))
         z = F.relu(self.conv2(z))
         z = z.reshape(-1)
@@ -59,19 +59,45 @@ class DeepQNetworkCNN(nn.Module):
         print(z)
         return z
 
+
+class ReplayMemory:
+    def __init__(self, capacity):
+        self.maxlen = capacity
+        self.memory = deque(maxlen=capacity)
+
+    def push(self, transition):
+        print(transition)
+        self.memory.append(transition)
+
+    def sample(self, batch_size):
+        return random.sample(self.memory, batch_size)
+
+    def __len__(self):
+        return len(self.memory)
+
+
 # Q-learning agent:
 # initialize Q: S x A -> R
 # for each step of the episode:
 #   choose eps-greedy action from Q
 class DQNAgent:
-    def __init__(self, num_actions):
+    def __init__(self, num_actions, replay_mem_size):
         self.dqn = DeepQNetworkCNN(in_channels=4, conv1_hidden_channels=16, conv2_hidden_channels=32,
                                    fc_hidden_units=256, num_outputs=num_actions)
+
+        self.replay_memory = ReplayMemory(replay_mem_size)
+
 
     def take_action(self, obs):
         scores = self.dqn(obs)
         act = torch.argmax(scores).item()
+        print(f"{act=}")
         return act
+
+    def add_transition(self, transition):
+        print("adding ", transition)
+        self.replay_memory.push(transition)
+        print("now, replay memory size = ", len(self.replay_memory))
 
 
 
@@ -85,6 +111,8 @@ def run_breakout():
     env = gym.make("ALE/Breakout-v5", render_mode="human")
     env.action_space.seed(RAND_SEED)
 
+    max_num_steps = 100
+    replay_mem_size = 1000
 
     # preprocess. these are all just the defaults
     # also add the customary stack of 4 frames
@@ -95,15 +123,18 @@ def run_breakout():
     obs, info = env.reset(seed=RAND_SEED)
     print(info)
 
-    dqn_agent = DQNAgent(env.action_space.n)
+    dqn_agent = DQNAgent(num_actions=env.action_space.n, replay_mem_size=replay_mem_size)
 
-    for _ in range(1000):
+    for _ in range(max_num_steps):
         # Random action
         # action = env.action_space.sample()
 
         obs_tensor = torch.from_numpy(np.array(obs)).float()
         action = dqn_agent.take_action(obs_tensor)
-        obs, rew, terminated, truncated, info = env.step(action)
+        new_obs, rew, terminated, truncated, info = env.step(action)
+
+        trans = (obs, action, new_obs, rew)
+        dqn_agent.add_transition(trans)
         # obs is an ndarray of shape
         # print(type(obs))
         # dict
