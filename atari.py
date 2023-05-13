@@ -101,7 +101,7 @@ class DQNAgent:
 
 
 
-def run_breakout():
+def train_breakout():
     RAND_SEED = 278933
 
     random.seed(RAND_SEED)
@@ -111,8 +111,8 @@ def run_breakout():
     env = gym.make("ALE/Breakout-v5", render_mode="human")
     env.action_space.seed(RAND_SEED)
 
-    max_num_steps = 100
-    replay_mem_size = 1000
+    max_num_steps = 1000
+    replay_mem_size = 5000
 
     # preprocess. these are all just the defaults
     # also add the customary stack of 4 frames
@@ -149,4 +149,4 @@ def run_breakout():
 if __name__ == '__main__':
     # TODO kick it off
     print("hello, breakout")
-    run_breakout()
+    train_breakout()
