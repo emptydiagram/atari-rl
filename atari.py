@@ -56,7 +56,7 @@ class DeepQNetworkCNN(nn.Module):
         z = z.reshape(-1)
         z = F.relu(self.fc(z))
         z = self.out(z)
-        print(z)
+        # print(z)
         return z
 
 
@@ -66,7 +66,7 @@ class ReplayMemory:
         self.memory = deque(maxlen=capacity)
 
     def push(self, transition):
-        print(transition)
+        # print(transition)
         self.memory.append(transition)
 
     def sample(self, batch_size):
@@ -88,16 +88,14 @@ class DQNAgent:
         self.replay_memory = ReplayMemory(replay_mem_size)
 
 
-    def take_action(self, obs):
+    def take_greedy_action(self, obs):
         scores = self.dqn(obs)
         act = torch.argmax(scores).item()
         print(f"{act=}")
         return act
 
     def add_transition(self, transition):
-        print("adding ", transition)
         self.replay_memory.push(transition)
-        print("now, replay memory size = ", len(self.replay_memory))
 
 
 
@@ -111,8 +109,29 @@ def train_breakout():
     env = gym.make("ALE/Breakout-v5", render_mode="human")
     env.action_space.seed(RAND_SEED)
 
-    max_num_steps = 1000
+    # from DQN papers
+    minibatch_size = 32
+
+    max_num_steps = 10000
     replay_mem_size = 5000
+
+    # epsilon schedule: linear annealing
+    eps_anneal_start = 1.0
+    eps_anneal_end = 0.1
+    # this is 1 million (ish? frames =? steps) in the DQN paper
+    eps_anneal_length = 0.5 * max_num_steps
+
+    # eps_start = 0.7
+    # eps_end = 0.2
+    # eps_end_step = 9
+    # t = 0: 0.7
+    # t = 4: 0.45
+    # t = 9: 0.2
+
+    # 0.7 - (0.5/10) * (t + 1)
+    # = 0.1 * (7 - (t + 1)/2)
+    #
+    # eps_start + (eps_end - eps_start) * (t + 1) / (eps_end_step + 1)
 
     # preprocess. these are all just the defaults
     # also add the customary stack of 4 frames
@@ -125,12 +144,19 @@ def train_breakout():
 
     dqn_agent = DQNAgent(num_actions=env.action_space.n, replay_mem_size=replay_mem_size)
 
-    for _ in range(max_num_steps):
-        # Random action
-        # action = env.action_space.sample()
+    for t in range(max_num_steps):
+        epsilon =  eps_anneal_start + (eps_anneal_end - eps_anneal_start) * t  / eps_anneal_length
+        if t % 10 == 0:
+            print(f"\n------ on step {t=}, {epsilon=}")
+            print("now, replay memory size = ", len(dqn_agent.replay_memory))
 
         obs_tensor = torch.from_numpy(np.array(obs)).float()
-        action = dqn_agent.take_action(obs_tensor)
+
+        # take action
+        if random.random() < epsilon:
+            action = random.randint(0, env.action_space.n - 1)
+        else:
+            action = dqn_agent.take_greedy_action(obs_tensor)
         new_obs, rew, terminated, truncated, info = env.step(action)
 
         trans = (obs, action, new_obs, rew)
