@@ -7,6 +7,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.optim as optim
 
 # for efficiency, the input is a state s, the output is an array of Q-values,
 # Q(s, a), for each of the possible actions a
@@ -70,7 +71,8 @@ class ReplayMemory:
         self.memory.append(transition)
 
     def sample(self, batch_size):
-        return random.sample(self.memory, batch_size)
+        idxs = np.random.choice(np.arange(len(self.memory)), size=batch_size)
+        return [self.memory[idx] for idx in idxs]
 
     def __len__(self):
         return len(self.memory)
@@ -114,6 +116,7 @@ def train_breakout():
 
     max_num_steps = 10000
     replay_mem_size = 5000
+    gamma = 0.99
 
     # epsilon schedule: linear annealing
     eps_anneal_start = 1.0
@@ -144,6 +147,11 @@ def train_breakout():
 
     dqn_agent = DQNAgent(num_actions=env.action_space.n, replay_mem_size=replay_mem_size)
 
+    optimizer = optim.Adam(dqn_agent.dqn.parameters(), lr=1e-3)
+    criterion = nn.MSELoss()
+
+    total_rewards = 0.
+
     for t in range(max_num_steps):
         epsilon =  eps_anneal_start + (eps_anneal_end - eps_anneal_start) * t  / eps_anneal_length
         if t % 10 == 0:
@@ -158,21 +166,38 @@ def train_breakout():
         else:
             action = dqn_agent.take_greedy_action(obs_tensor)
         new_obs, rew, terminated, truncated, info = env.step(action)
+        new_obs_tensor = torch.from_numpy(np.array(obs)).float()
 
-        trans = (obs, action, new_obs, rew)
+        total_rewards += rew
+
+        is_terminal = terminated or truncated
+        trans = (obs_tensor, action, rew, new_obs_tensor, is_terminal)
         dqn_agent.add_transition(trans)
         # obs is an ndarray of shape
         # print(type(obs))
         # dict
         # print(type(info))
 
-        if terminated or truncated:
+        rm_sample = dqn_agent.replay_memory.sample(batch_size=minibatch_size)
+        print('............##')
+        print(type(rm_sample))
+        print(rm_sample[0])
+        sample_states, sample_actions, sample_rewards, sample_next_states, sample_is_terminals = map(list, zip(*rm_sample))
+        # each is length minibatch_size (32)
+        print(sample_states[0].shape)
+        print(sample_actions[0])
+        print(sample_rewards[0])
+        print(sample_next_states[0].shape)
+        print(sample_is_terminals[0])
+
+        # loss = criterion(expecteds, targets)
+
+        if is_terminal:
             print(f"Resetting because {'terminated' if terminated else 'truncated'}!")
             obs, info = env.reset()
 
     env.close()
 
 if __name__ == '__main__':
-    # TODO kick it off
     print("hello, breakout")
     train_breakout()
