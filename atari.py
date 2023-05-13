@@ -1,3 +1,6 @@
+import math
+import random
+
 import gymnasium as gym
 import numpy as np
 import torch
@@ -7,15 +10,36 @@ import torch.nn.functional as F
 # for efficiency, the input is a state s, the output is an array of Q-values,
 # Q(s, a), for each of the possible actions a
 class DeepQNetworkCNN(nn.Module):
-    def __init__(self, in_channels, conv1_hidden_channels, conv2_hidden_channels, fc_hidden_units):
+    def __init__(self, in_channels, conv1_hidden_channels, conv2_hidden_channels, fc_hidden_units, num_outputs):
         super().__init__()
         # from 2013 paper:
         #  - 8x8 kernel, 16 feature maps, stride 4, followed by ReLU
         #  - 4x4 kernel, 32 feature maps, stride 2, followed by ReLU
         #  - fully connected hidden layer w/ 256 ReLU neurons
-        self.conv1 = nn.Conv2d(in_channels, conv1_hidden_channels, 8, stride=4, padding=0)
-        self.conv2 = nn.Conv2d(conv1_hidden_channels, conv2_hidden_channels, 4, stride=2, padding=0)
-        self.fc = nn.Linear(64, fc_hidden_units)
+
+        # (H - K + 1)/S
+        H1 = 84
+        K1 = 8
+        S1 = 4
+        H2 = math.ceil((H1 - K1 + 1)/S1)
+        K2 = 4
+        S2 = 2
+        H3 = math.ceil((H2 - K2 + 1)/S2)
+        # (H1 = 84) implies (H3 = 9)
+        # H1 = 84
+        # K1 = 8
+        # S1 = 4
+        # 0 4 8 12 16 20 24 28 32 36 40 44 48 52 56 60 64 68 72 76
+        # H2 = 20
+        # K2 = 4
+        # S2 = 2
+        # ceil[(20 - 4 + 1)/2] = ceil[17/2] = 9
+        # 0 2 4 6 8 10 12 14 16
+
+        self.conv1 = nn.Conv2d(in_channels, conv1_hidden_channels, K1, stride=S1, padding=0)
+        self.conv2 = nn.Conv2d(conv1_hidden_channels, conv2_hidden_channels, K2, stride=S2, padding=0)
+        self.fc = nn.Linear(conv2_hidden_channels * H3 ** 2, fc_hidden_units)
+        self.out = nn.Linear(fc_hidden_units, num_outputs)
 
 
     def forward(self, x):
@@ -26,13 +50,13 @@ class DeepQNetworkCNN(nn.Module):
         The value `a* := argmax_{a in A} [ Q(x,a) ]` is the greedy action. The agent using the DQN will (often) use an
         epsilon-greedy strategy (e.g. take a random action with probability `eps`, and `a*` with probability
         `1 - eps`)"""
-        print(type(x))
         print(x.shape)
         z = F.relu(self.conv1(x))
         z = F.relu(self.conv2(z))
-        print(f"after conv2, z.shape = {z.shape}")
+        z = z.reshape(-1)
         z = F.relu(self.fc(z))
-        print(f"after fc, z.shape = {z.shape}")
+        z = self.out(z)
+        print(z)
         return z
 
 # Q-learning agent:
@@ -40,18 +64,27 @@ class DeepQNetworkCNN(nn.Module):
 # for each step of the episode:
 #   choose eps-greedy action from Q
 class DQNAgent:
-    def __init__(self):
-        self.dqn = DeepQNetworkCNN(in_channels=4, conv1_hidden_channels=16, conv2_hidden_channels=32, fc_hidden_units=256)
+    def __init__(self, num_actions):
+        self.dqn = DeepQNetworkCNN(in_channels=4, conv1_hidden_channels=16, conv2_hidden_channels=32,
+                                   fc_hidden_units=256, num_outputs=num_actions)
 
     def take_action(self, obs):
-        return self.dqn(obs)
+        scores = self.dqn(obs)
+        act = torch.argmax(scores).item()
+        return act
 
 
 
 def run_breakout():
     RAND_SEED = 278933
+
+    random.seed(RAND_SEED)
+    torch.manual_seed(RAND_SEED)
+    np.random.seed(RAND_SEED)
+
     env = gym.make("ALE/Breakout-v5", render_mode="human")
     env.action_space.seed(RAND_SEED)
+
 
     # preprocess. these are all just the defaults
     # also add the customary stack of 4 frames
@@ -62,7 +95,7 @@ def run_breakout():
     obs, info = env.reset(seed=RAND_SEED)
     print(info)
 
-    dqn_agent = DQNAgent()
+    dqn_agent = DQNAgent(env.action_space.n)
 
     for _ in range(1000):
         # Random action
