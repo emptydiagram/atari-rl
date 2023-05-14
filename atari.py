@@ -96,7 +96,6 @@ class DQNAgent:
     def take_greedy_action(self, obs):
         scores = self.dqn(obs)
         act = torch.argmax(scores).item()
-        print(f"{act=}")
         return act
 
     def add_transition(self, transition):
@@ -117,15 +116,15 @@ def train_breakout():
     # from DQN papers
     minibatch_size = 32
 
-    max_num_steps = 2000
-    replay_mem_size = 1000
+    max_num_steps = 10000
+    replay_mem_size = 2000
     gamma = 0.99
 
     # epsilon schedule: linear annealing
     eps_anneal_start = 1.0
     eps_anneal_end = 0.1
     # this is 1 million (ish? frames =? steps) in the DQN paper
-    eps_anneal_length = 0.5 * max_num_steps
+    eps_anneal_length = round(0.25 * max_num_steps)
 
     # eps_start = 0.7
     # eps_end = 0.2
@@ -158,7 +157,7 @@ def train_breakout():
     for t in range(max_num_steps):
         epsilon =  max(eps_anneal_end,
                        eps_anneal_start + (eps_anneal_end - eps_anneal_start) * t  / eps_anneal_length)
-        if t % 10 == 0:
+        if t % 50 == 0:
             print(f"\n------ on step {t=}, {epsilon=}")
             print("now, replay memory size = ", len(dqn_agent.replay_memory))
 
@@ -197,11 +196,6 @@ def train_breakout():
         batch_next_states = torch.stack(sample_next_states)
         batch_is_terminals = torch.tensor([1. if it == True else 0. for it in sample_is_terminals])
 
-        # print(batch_states.shape)
-        # print(batch_next_states.shape)
-        # print(batch_is_terminals.shape)
-        # print(batch_is_terminals.dtype)
-
         one_minus_bit = 1. - batch_is_terminals
         targets = batch_rewards
         expecteds = torch.zeros(targets.shape)
@@ -210,9 +204,11 @@ def train_breakout():
         net_scores_next = dqn_agent.apply_net(batch_next_states)
 
         targets += (1. - batch_is_terminals) * gamma * torch.max(net_scores_next, 1).values
-        expecteds = net_scores[:, batch_actions]
+        batch_actions = batch_actions.unsqueeze(1)
+        selected_scores = net_scores.gather(1, batch_actions)
+        expecteds = selected_scores.squeeze(1)
 
-        loss = criterion(expecteds, targets)
+        loss = criterion(targets, expecteds)
 
         optimizer.zero_grad()
         loss.backward()
