@@ -89,6 +89,8 @@ class DQNAgent:
 
         self.replay_memory = ReplayMemory(replay_mem_size)
 
+    def apply_net(self, input):
+        return self.dqn(input)
 
     def take_greedy_action(self, obs):
         scores = self.dqn(obs)
@@ -179,18 +181,50 @@ def train_breakout():
         # print(type(info))
 
         rm_sample = dqn_agent.replay_memory.sample(batch_size=minibatch_size)
-        print('............##')
-        print(type(rm_sample))
-        print(rm_sample[0])
-        sample_states, sample_actions, sample_rewards, sample_next_states, sample_is_terminals = map(list, zip(*rm_sample))
-        # each is length minibatch_size (32)
-        print(sample_states[0].shape)
-        print(sample_actions[0])
-        print(sample_rewards[0])
-        print(sample_next_states[0].shape)
-        print(sample_is_terminals[0])
 
-        # loss = criterion(expecteds, targets)
+        # each is length minibatch_size (32)
+        sample_states, \
+            sample_actions, \
+            sample_rewards, \
+            sample_next_states, \
+            sample_is_terminals = map(list, zip(*rm_sample))
+
+        batch_states = torch.stack(sample_states)
+        batch_actions = torch.tensor(sample_actions)
+        batch_rewards = torch.tensor(sample_rewards)
+        batch_next_states = torch.stack(sample_next_states)
+        batch_is_terminals = torch.tensor([1. if it == True else 0. for it in sample_is_terminals])
+
+        # print(batch_states.shape)
+        # print(batch_next_states.shape)
+        # print(batch_is_terminals.shape)
+        # print(batch_is_terminals.dtype)
+
+        one_minus_bit = 1. - batch_is_terminals
+        targets = batch_rewards
+        expecteds = torch.zeros(targets.shape)
+
+        for i in range(targets.shape[0]):
+            if batch_is_terminals[i] == 0.:
+                net_out_next = dqn_agent.apply_net(batch_next_states[i])
+                targets[i] += torch.max(net_out_next)
+                net_out = dqn_agent.apply_net(batch_states[i])
+                expecteds[i] = net_out[batch_actions[i]]
+
+        # print('::')
+        # print(targets.shape)
+        # print(sample_is_terminals[0])
+
+        loss = criterion(expecteds, targets)
+
+        # print('>>>>>> loss = ', loss.item())
+
+        optimizer.zero_grad()
+        loss.backward()
+        # in the paper, they make all negative rewards -1, and all positive rewards +1
+        for param in dqn_agent.dqn.parameters():
+            param.grad.data.clamp_(-1, 1)
+        optimizer.step()
 
         if is_terminal:
             print(f"Resetting because {'terminated' if terminated else 'truncated'}!")
