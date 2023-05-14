@@ -52,12 +52,14 @@ class DeepQNetworkCNN(nn.Module):
         The value `a* := argmax_{a in A} [ Q(x,a) ]` is the greedy action. The agent using the DQN will (often) use an
         epsilon-greedy strategy (e.g. take a random action with probability `eps`, and `a*` with probability
         `1 - eps`)"""
+        if len(x.shape) == 3:
+            x = x.unsqueeze(0)
+        minibatch_size = x.shape[0] if len(x.shape) == 4 else 1
         z = F.relu(self.conv1(x))
         z = F.relu(self.conv2(z))
-        z = z.reshape(-1)
+        z = z.reshape(minibatch_size, -1)
         z = F.relu(self.fc(z))
         z = self.out(z)
-        # print(z)
         return z
 
 
@@ -67,7 +69,6 @@ class ReplayMemory:
         self.memory = deque(maxlen=capacity)
 
     def push(self, transition):
-        # print(transition)
         self.memory.append(transition)
 
     def sample(self, batch_size):
@@ -116,8 +117,8 @@ def train_breakout():
     # from DQN papers
     minibatch_size = 32
 
-    max_num_steps = 10000
-    replay_mem_size = 5000
+    max_num_steps = 2000
+    replay_mem_size = 1000
     gamma = 0.99
 
     # epsilon schedule: linear annealing
@@ -155,7 +156,8 @@ def train_breakout():
     total_rewards = 0.
 
     for t in range(max_num_steps):
-        epsilon =  eps_anneal_start + (eps_anneal_end - eps_anneal_start) * t  / eps_anneal_length
+        epsilon =  max(eps_anneal_end,
+                       eps_anneal_start + (eps_anneal_end - eps_anneal_start) * t  / eps_anneal_length)
         if t % 10 == 0:
             print(f"\n------ on step {t=}, {epsilon=}")
             print("now, replay memory size = ", len(dqn_agent.replay_memory))
@@ -204,20 +206,13 @@ def train_breakout():
         targets = batch_rewards
         expecteds = torch.zeros(targets.shape)
 
-        for i in range(targets.shape[0]):
-            if batch_is_terminals[i] == 0.:
-                net_out_next = dqn_agent.apply_net(batch_next_states[i])
-                targets[i] += torch.max(net_out_next)
-                net_out = dqn_agent.apply_net(batch_states[i])
-                expecteds[i] = net_out[batch_actions[i]]
+        net_scores = dqn_agent.apply_net(batch_states)
+        net_scores_next = dqn_agent.apply_net(batch_next_states)
 
-        # print('::')
-        # print(targets.shape)
-        # print(sample_is_terminals[0])
+        targets += (1. - batch_is_terminals) * gamma * torch.max(net_scores_next, 1).values
+        expecteds = net_scores[:, batch_actions]
 
         loss = criterion(expecteds, targets)
-
-        # print('>>>>>> loss = ', loss.item())
 
         optimizer.zero_grad()
         loss.backward()
